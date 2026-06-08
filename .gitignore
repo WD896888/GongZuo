@@ -1,0 +1,11 @@
+# 依赖目录
+node_modules/
+
+# IDE配置
+.trae/
+
+# 日志文件
+*.log
+
+# 环境变量
+.env

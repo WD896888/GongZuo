@@ -567,6 +567,12 @@ function bind() {
     document.querySelector('.stage__pages').style.transform = `scale(${store.zoom})`;
   });
 
+  // 主题切换
+  document.getElementById('themeBtn').addEventListener('click', () => {
+    const isLight = document.body.classList.contains('theme-light');
+    applyTheme(isLight ? 'dark' : 'light');
+  });
+
   // 帮助弹层
   const modal = document.getElementById('helpModal');
   document.getElementById('helpBtn').addEventListener('click', () => modal.hidden = false);
@@ -578,8 +584,25 @@ function bind() {
   });
 }
 
+/* ============== 主题模块 ============== */
+const THEME_KEY = 'invoice_workshop_theme';
+
+function applyTheme(theme) {
+  document.body.classList.toggle('theme-light', theme === 'light');
+  try { localStorage.setItem(THEME_KEY, theme); } catch {}
+}
+
+function getPreferredTheme() {
+  try {
+    const saved = localStorage.getItem(THEME_KEY);
+    if (saved === 'light' || saved === 'dark') return saved;
+  } catch {}
+  return 'dark';
+}
+
 /* ============== 启动 ============== */
 function init() {
+  applyTheme(getPreferredTheme());
   syncControls();
   bind();
   bindPdfModal();

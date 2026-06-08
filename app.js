@@ -172,6 +172,11 @@ function computeSlots(count) {
     const h = (area.h - gap) / 2;
     slots.push({ x: area.x, y: area.y, w: area.w, h });
     slots.push({ x: area.x, y: area.y + h + gap, w: area.w, h });
+  } else if (count === 3) {
+    const h = (area.h - gap * 2) / 3;
+    for (let i = 0; i < 3; i++) {
+      slots.push({ x: area.x, y: area.y + i * (h + gap), w: area.w, h });
+    }
   } else if (count === 4) {
     const w = (area.w - gap) / 2;
     const h = (area.h - gap) / 2;
@@ -588,6 +593,7 @@ function bind() {
 const THEME_KEY = 'invoice_workshop_theme';
 
 function applyTheme(theme) {
+  document.body.classList.toggle('theme-dark', theme === 'dark');
   document.body.classList.toggle('theme-light', theme === 'light');
   try { localStorage.setItem(THEME_KEY, theme); } catch {}
 }
@@ -597,7 +603,7 @@ function getPreferredTheme() {
     const saved = localStorage.getItem(THEME_KEY);
     if (saved === 'light' || saved === 'dark') return saved;
   } catch {}
-  return 'dark';
+  return 'light';
 }
 
 /* ============== 启动 ============== */

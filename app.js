@@ -374,16 +374,16 @@ function buildPrintArea() {
   const pages = layoutImages();
   const copies = Math.max(1, store.settings.copies | 0);
 
-  // 注入 CSS 变量控制 @page 与页面尺寸
+  // 注入 @page 规则直接控制打印纸张（不使用CSS变量，兼容性更好）
   const styleId = 'printVars';
-  document.getElementById(styleId)?.remove();
+  let oldStyle = document.getElementById(styleId);
+  if (oldStyle) oldStyle.remove();
   const styleEl = document.createElement('style');
   styleEl.id = styleId;
   styleEl.textContent = `
-    :root {
-      --print-paper: ${pageSize.w}mm ${pageSize.h}mm;
-      --print-w: ${pageSize.w}mm;
-      --print-h: ${pageSize.h}mm;
+    @page {
+      size: ${pageSize.w}mm ${pageSize.h}mm;
+      margin: 0;
     }
   `;
   document.head.appendChild(styleEl);
@@ -392,6 +392,8 @@ function buildPrintArea() {
     pages.forEach((slots) => {
       const p = document.createElement('section');
       p.className = 'print-page';
+      p.style.width = pageSize.w + 'mm';
+      p.style.height = pageSize.h + 'mm';
       slots.forEach(({ img, x, y, w, h }) => {
         const s = document.createElement('div');
         s.className = 'print-slot';

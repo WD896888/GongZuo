@@ -889,6 +889,11 @@ kbd {
 }
 
 /* ============== 打印样式 ============== */
+@page {
+  size: var(--print-paper, A4);
+  margin: 0;
+}
+
 @media print {
   html, body {
     background: #fff !important;
@@ -903,6 +908,8 @@ kbd {
     left: 0 !important;
   }
   .print-page {
+    width: var(--print-w, 210mm);
+    height: var(--print-h, 297mm);
     page-break-after: always;
     break-after: page;
     position: relative;

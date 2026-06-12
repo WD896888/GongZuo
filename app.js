@@ -373,21 +373,19 @@ function buildPrintArea() {
   const pageSize = getPageSize();
   const pages = layoutImages();
   const copies = Math.max(1, store.settings.copies | 0);
+  const pageW = pageSize.w;
+  const pageH = pageSize.h;
 
-  // 获取纸张原始尺寸（不随方向交换）
-  const paper = PAPER_SIZES[store.settings.paperSize] || PAPER_SIZES.A4;
-  const orientation = store.settings.orientation;
-
-  // 注入 @page 规则（使用标准纸张名 + 方向关键字，确保打印机正确识别方向）
+  // 注入 CSS 变量控制 @page 与页面尺寸
   const styleId = 'printVars';
-  let oldStyle = document.getElementById(styleId);
-  if (oldStyle) oldStyle.remove();
+  document.getElementById(styleId)?.remove();
   const styleEl = document.createElement('style');
   styleEl.id = styleId;
   styleEl.textContent = `
-    @page {
-      size: ${store.settings.paperSize} ${orientation};
-      margin: 0;
+    :root {
+      --print-paper: ${pageW}mm ${pageH}mm;
+      --print-w: ${pageW}mm;
+      --print-h: ${pageH}mm;
     }
   `;
   document.head.appendChild(styleEl);
@@ -396,15 +394,14 @@ function buildPrintArea() {
     pages.forEach((slots) => {
       const p = document.createElement('section');
       p.className = 'print-page';
-      p.style.width = pageSize.w + 'mm';
-      p.style.height = pageSize.h + 'mm';
       slots.forEach(({ img, x, y, w, h }) => {
         const s = document.createElement('div');
         s.className = 'print-slot';
-        s.style.left   = x + 'mm';
-        s.style.top    = y + 'mm';
-        s.style.width  = w + 'mm';
-        s.style.height = h + 'mm';
+        // 使用百分比定位，避免不同浏览器/打印机对 mm 单位解析差异导致的偏移
+        s.style.left   = ((x / pageW) * 100).toFixed(4) + '%';
+        s.style.top    = ((y / pageH) * 100).toFixed(4) + '%';
+        s.style.width  = ((w / pageW) * 100).toFixed(4) + '%';
+        s.style.height = ((h / pageH) * 100).toFixed(4) + '%';
         const im = document.createElement('img');
         im.src = img.src;
         if (img.rotate) im.style.transform = `rotate(${img.rotate}deg)`;

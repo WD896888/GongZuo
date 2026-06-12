@@ -374,7 +374,11 @@ function buildPrintArea() {
   const pages = layoutImages();
   const copies = Math.max(1, store.settings.copies | 0);
 
-  // 注入 @page 规则直接控制打印纸张（不使用CSS变量，兼容性更好）
+  // 获取纸张原始尺寸（不随方向交换）
+  const paper = PAPER_SIZES[store.settings.paperSize] || PAPER_SIZES.A4;
+  const orientation = store.settings.orientation;
+
+  // 注入 @page 规则（使用标准纸张名 + 方向关键字，确保打印机正确识别方向）
   const styleId = 'printVars';
   let oldStyle = document.getElementById(styleId);
   if (oldStyle) oldStyle.remove();
@@ -382,7 +386,7 @@ function buildPrintArea() {
   styleEl.id = styleId;
   styleEl.textContent = `
     @page {
-      size: ${pageSize.w}mm ${pageSize.h}mm;
+      size: ${store.settings.paperSize} ${orientation};
       margin: 0;
     }
   `;

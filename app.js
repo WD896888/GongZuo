@@ -373,8 +373,6 @@ function buildPrintArea() {
   const pageSize = getPageSize();
   const pages = layoutImages();
   const copies = Math.max(1, store.settings.copies | 0);
-  const pageW = pageSize.w;
-  const pageH = pageSize.h;
 
   // 注入 CSS 变量控制 @page 与页面尺寸
   const styleId = 'printVars';
@@ -383,9 +381,9 @@ function buildPrintArea() {
   styleEl.id = styleId;
   styleEl.textContent = `
     :root {
-      --print-paper: ${pageW}mm ${pageH}mm;
-      --print-w: ${pageW}mm;
-      --print-h: ${pageH}mm;
+      --print-paper: ${pageSize.w}mm ${pageSize.h}mm;
+      --print-w: ${pageSize.w}mm;
+      --print-h: ${pageSize.h}mm;
     }
   `;
   document.head.appendChild(styleEl);
@@ -397,11 +395,10 @@ function buildPrintArea() {
       slots.forEach(({ img, x, y, w, h }) => {
         const s = document.createElement('div');
         s.className = 'print-slot';
-        // 使用百分比定位，避免不同浏览器/打印机对 mm 单位解析差异导致的偏移
-        s.style.left   = ((x / pageW) * 100).toFixed(4) + '%';
-        s.style.top    = ((y / pageH) * 100).toFixed(4) + '%';
-        s.style.width  = ((w / pageW) * 100).toFixed(4) + '%';
-        s.style.height = ((h / pageH) * 100).toFixed(4) + '%';
+        s.style.left   = x + 'mm';
+        s.style.top    = y + 'mm';
+        s.style.width  = w + 'mm';
+        s.style.height = h + 'mm';
         const im = document.createElement('img');
         im.src = img.src;
         if (img.rotate) im.style.transform = `rotate(${img.rotate}deg)`;
@@ -447,6 +444,7 @@ function syncControls() {
 
 /* ============== 主渲染 ============== */
 function render() {
+  syncControls();
   renderThumbs();
   renderPreview();
   renderCounters();
@@ -514,7 +512,9 @@ function bind() {
 
   // 打印设置
   document.getElementById('paperSize').addEventListener('change', e => {
-    store.updateSettings({ paperSize: e.target.value });
+    const patch = { paperSize: e.target.value };
+    if (patch.paperSize === 'B5') { patch.align = 'top'; patch.margin = 3; }
+    store.updateSettings(patch);
   });
   document.getElementById('margin').addEventListener('input', e => {
     const v = +e.target.value;

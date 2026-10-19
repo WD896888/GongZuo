@@ -610,6 +610,12 @@ function bind() {
   });
   // 打印结束后再清空打印容器：用固定定时器会在打印预览尚未抓取内容时误清
   window.addEventListener('afterprint', clearPrintArea);
+  // 用户直接用浏览器菜单 / Ctrl+P 打印时，补建打印容器（否则打出来是空白）
+  window.addEventListener('beforeprint', () => {
+    if (store.images.length && !document.querySelector('#printArea .print-page')) {
+      buildPrintArea();
+    }
+  });
   document.getElementById('clearBtn').addEventListener('click', () => {
     if (store.images.length === 0) return;
     if (confirm(`确定清空全部 ${store.images.length} 张图片？`)) store.clear();
@@ -820,16 +826,78 @@ async function paintPdfPage(pdfDoc, pageNum, canvas, scale) {
   return viewport;
 }
 
+/** 统计页面里「绘制文字」指令的数量（只读操作符列表，不额外解析字体） */
+async function countTextOps(page) {
+  try {
+    const { fnArray } = await page.getOperatorList();
+    const OPS = window.pdfjsLib.OPS;
+    const TEXT_OPS = [OPS.showText, OPS.showSpacedText, OPS.nextLineShowText, OPS.nextLineSetSpacingShowText];
+    return fnArray.reduce((n, fn) => n + (TEXT_OPS.includes(fn) ? 1 : 0), 0);
+  } catch {
+    return 0;
+  }
+}
+
+/** 缩略采样估算非白像素占比（160px 宽，成本可忽略，避免整页 getImageData） */
+function canvasInkRatio(canvas) {
+  const w = 160;
+  const h = Math.max(1, Math.round(canvas.height * w / canvas.width));
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const ctx = c.getContext('2d', { willReadFrequently: true });
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, w, h);
+  ctx.drawImage(canvas, 0, 0, w, h);
+  const d = ctx.getImageData(0, 0, w, h).data;
+  let ink = 0;
+  for (let i = 0; i < d.length; i += 4) {
+    if (d[i] < 245 || d[i + 1] < 245 || d[i + 2] < 245) ink++;
+  }
+  return ink / (w * h);
+}
+
+/**
+ * 渲染结果自检（防止「静默缺字」再次发生）
+ * 判定条件收紧为：PDF 确实有文字绘制指令 + 一个字符都提取不出来 + 画面几乎全白。
+ * 缺 ToUnicode 的 PDF 能正常显示但提取不到文本，画面有内容 → 只提示不拦截，避免误杀。
+ */
+async function assertTextDecoded(page, canvas, pageNum) {
+  if (!(await countTextOps(page))) return;   // 纯图片页 / 扫描件：不判定
+
+  let chars = 0;
+  try {
+    const tc = await page.getTextContent();
+    chars = tc.items.reduce((n, it) => n + (it.str ? it.str.replace(/\s/g, '').length : 0), 0);
+  } catch {
+    chars = -1;                              // 提取本身抛错：无法确认，不拦截
+  }
+  if (chars !== 0) return;
+
+  if (canvasInkRatio(canvas) < 0.0002) {
+    throw new Error(`第 ${pageNum} 页文字未能渲染（字体/CMap 资源异常）`);
+  }
+  console.warn(`[PDF] 第 ${pageNum} 页未能提取到文本（可能缺少 ToUnicode），请核对预览`);
+}
+
 /**
  * 渲染 PDF 单页到 dataURL
  * @param {PDFDocumentProxy} pdfDoc
  * @param {number} pageNum
- * @param {number} scale 缩放倍率（1 = 72dpi，2.5 ≈ 180dpi，3.5 ≈ 252dpi）
+ * @param {number} scale 缩放倍率（1 = 72dpi，2.5 ≈ 180dpi）
  */
 async function renderPdfPageToDataURL(pdfDoc, pageNum, scale = 1.5) {
+  const page = await pdfDoc.getPage(pageNum);
   const canvas = document.createElement('canvas');
   await paintPdfPage(pdfDoc, pageNum, canvas, scale);
-  return canvas.toDataURL('image/png');
+  await assertTextDecoded(page, canvas, pageNum);
+
+  const dataURL = canvas.toDataURL('image/png');
+  // 编码失败（页面尺寸过大 / 内存不足）时浏览器会返回极短的 "data:"，
+  // 若直接入库会得到 0×0 的图，排版算出 NaN，最后打印成空白。
+  if (!dataURL || dataURL.length < 1024) {
+    throw new Error(`第 ${pageNum} 页渲染失败（画布编码为空，可能是页面过大或内存不足）`);
+  }
+  return dataURL;
 }
 
 async function renderPdfPageToCanvas(pdfDoc, pageNum, canvas, scale) {

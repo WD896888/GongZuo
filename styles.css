@@ -609,10 +609,11 @@ kbd {
   overflow: hidden;
 }
 .page__img {
-  max-width: 100%;
-  max-height: 100%;
+  /* 宽高由 JS 按「旋转前尺寸」精确指定；此处不能再加 max-width/height 约束，
+     否则 rotate(90deg) 的图片会被压回槽位宽度，旋转后画面被裁掉一半 */
   display: block;
   object-fit: contain;
+  transform-origin: center center;
 }
 
 /* ============== 底部操作栏 ============== */
@@ -889,8 +890,9 @@ kbd {
 }
 
 /* ============== 打印样式 ============== */
+/* 注意：@page 描述符不支持 CSS 变量（size: var(...) 会被整条判为无效），
+   纸张尺寸由 app.js 在打印前生成字面量的 @page 规则注入。 */
 @page {
-  size: var(--print-paper, A4);
   margin: 0;
 }
 
@@ -925,10 +927,9 @@ kbd {
     overflow: hidden;
   }
   .print-slot img {
-    max-width: 100%;
-    max-height: 100%;
     display: block;
     object-fit: contain;
+    transform-origin: center center;
   }
 }
 

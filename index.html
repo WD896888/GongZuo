@@ -290,12 +290,12 @@
 <!-- 打印专用容器（打印时显示） -->
 <div class="print-area" id="printArea" aria-hidden="true"></div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<!-- PDF.js：使用项目内置版本，不依赖 CDN（避免境内网络不可达导致中文缺字） -->
+<script src="vendor/pdfjs/pdf.min.js"></script>
 <script>
-  // 配置 PDF.js worker
+  // 配置 PDF.js worker（本地）
   if (window['pdfjsLib']) {
-    window['pdfjsLib'].GlobalWorkerOptions.workerSrc =
-      'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    window['pdfjsLib'].GlobalWorkerOptions.workerSrc = 'vendor/pdfjs/pdf.worker.min.js';
   }
 </script>
 <script src="app.js"></script>

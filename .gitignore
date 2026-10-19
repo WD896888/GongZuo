@@ -11,3 +11,6 @@ node_modules/
 .env
 
 .vercel
+
+# 本地工作区数据（会话记忆等）
+.workbuddy/

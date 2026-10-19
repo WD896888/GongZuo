@@ -237,7 +237,13 @@ function placeInSlot(img, slot) {
     drawY = slot.y + (slot.h - drawH) / 2;
   }
 
-  return { x: drawX, y: drawY, w: drawW, h: drawH };
+  return {
+    x: drawX, y: drawY, w: drawW, h: drawH,
+    // <img> 元素自身尺寸：旋转 90/270 时按「未旋转」尺寸设置，
+    // 这样 rotate() 之后的包围盒才正好等于 w×h，不会被父级 overflow 裁掉。
+    elW: swapped ? drawH : drawW,
+    elH: swapped ? drawW : drawH
+  };
 }
 
 /* ============== 屏幕预览渲染 ============== */
@@ -263,7 +269,7 @@ function renderPreview() {
     label.textContent = `第 ${pIdx + 1} 页 / 共 ${pages.length} 页`;
     page.appendChild(label);
 
-    slots.forEach(({ img, x, y, w, h }) => {
+    slots.forEach(({ img, x, y, w, h, elW, elH }) => {
       const slot = document.createElement('div');
       slot.className = 'page__slot';
       slot.style.left   = pxFromMm(x) * scale + 'px';
@@ -274,7 +280,9 @@ function renderPreview() {
       const im = document.createElement('img');
       im.className = 'page__img';
       im.src = img.src;
-      im.style.transform = `rotate(${img.rotate || 0}deg)`;
+      im.style.width  = pxFromMm(elW) * scale + 'px';
+      im.style.height = pxFromMm(elH) * scale + 'px';
+      if (img.rotate) im.style.transform = `rotate(${img.rotate}deg)`;
       slot.appendChild(im);
       page.appendChild(slot);
     });
@@ -367,6 +375,34 @@ function renderCounters() {
 }
 
 /* ============== 打印 ============== */
+let printInProgress = false;
+
+function clearPrintArea() {
+  const area = document.getElementById('printArea');
+  if (area) area.innerHTML = '';
+}
+
+/** 等待打印容器内的图片全部解码完成（否则打印预览会出现空白格） */
+function waitForImages(root) {
+  const imgs = Array.from(root.querySelectorAll('img'));
+  return Promise.all(imgs.map(im => {
+    if (im.complete && im.naturalWidth > 0) {
+      return im.decode ? im.decode().catch(() => {}) : Promise.resolve();
+    }
+    return new Promise(resolve => {
+      im.addEventListener('load', resolve, { once: true });
+      im.addEventListener('error', resolve, { once: true });
+    });
+  }));
+}
+
+/** 等待两个渲染帧，确保图片真的已经绘制到图层 */
+function nextPaint() {
+  return new Promise(resolve => {
+    requestAnimationFrame(() => requestAnimationFrame(resolve));
+  });
+}
+
 function buildPrintArea() {
   const area = document.getElementById('printArea');
   area.innerHTML = '';
@@ -374,14 +410,14 @@ function buildPrintArea() {
   const pages = layoutImages();
   const copies = Math.max(1, store.settings.copies | 0);
 
-  // 注入 CSS 变量控制 @page 与页面尺寸
+  // 注入字面量的 @page 规则（@page 不支持 var()）+ 页面尺寸变量
   const styleId = 'printVars';
   document.getElementById(styleId)?.remove();
   const styleEl = document.createElement('style');
   styleEl.id = styleId;
   styleEl.textContent = `
+    @page { size: ${pageSize.w}mm ${pageSize.h}mm; margin: 0; }
     :root {
-      --print-paper: ${pageSize.w}mm ${pageSize.h}mm;
       --print-w: ${pageSize.w}mm;
       --print-h: ${pageSize.h}mm;
     }
@@ -392,7 +428,7 @@ function buildPrintArea() {
     pages.forEach((slots) => {
       const p = document.createElement('section');
       p.className = 'print-page';
-      slots.forEach(({ img, x, y, w, h }) => {
+      slots.forEach(({ img, x, y, w, h, elW, elH }) => {
         const s = document.createElement('div');
         s.className = 'print-slot';
         s.style.left   = x + 'mm';
@@ -401,6 +437,8 @@ function buildPrintArea() {
         s.style.height = h + 'mm';
         const im = document.createElement('img');
         im.src = img.src;
+        im.style.width  = elW + 'mm';
+        im.style.height = elH + 'mm';
         if (img.rotate) im.style.transform = `rotate(${img.rotate}deg)`;
         s.appendChild(im);
         p.appendChild(s);
@@ -410,15 +448,28 @@ function buildPrintArea() {
   }
 }
 
-function doPrint() {
-  if (store.images.length === 0) return;
-  buildPrintArea();
-  // 等 DOM 渲染完成
-  setTimeout(() => {
+async function doPrint() {
+  if (store.images.length === 0 || printInProgress) return;
+  printInProgress = true;
+
+  const printBtn  = document.getElementById('printBtn');
+  const exportBtn = document.getElementById('exportBtn');
+  printBtn.disabled = true;
+  exportBtn.disabled = true;
+
+  try {
+    clearPrintArea();
+    buildPrintArea();
+    await waitForImages(document.getElementById('printArea'));
+    await nextPaint();
     window.print();
-    // 打印结束后清空 printArea（部分浏览器不会立即清理）
-    setTimeout(() => { document.getElementById('printArea').innerHTML = ''; }, 1000);
-  }, 50);
+  } catch (err) {
+    console.error('打印准备失败:', err);
+    alert('打印准备失败：' + (err.message || err));
+  } finally {
+    printInProgress = false;
+    renderCounters();   // 按真实状态恢复按钮（图片可能已被清空）
+  }
 }
 
 /* ============== 控件同步 ============== */
@@ -557,6 +608,8 @@ function bind() {
   document.getElementById('exportBtn').addEventListener('click', () => {
     doPrint();
   });
+  // 打印结束后再清空打印容器：用固定定时器会在打印预览尚未抓取内容时误清
+  window.addEventListener('afterprint', clearPrintArea);
   document.getElementById('clearBtn').addEventListener('click', () => {
     if (store.images.length === 0) return;
     if (confirm(`确定清空全部 ${store.images.length} 张图片？`)) store.clear();
@@ -633,24 +686,72 @@ if (document.readyState === 'loading') {
 let pdfQueue = [];        // 待处理的 PDF 文件队列
 let currentPdf = null;    // 当前正在处理的 PDF { file, pdfDoc, selected: Set<pageNum> }
 
-// PDF.js 资源 URL（用于 CMap 与标准字体解码）
-const PDFJS_CMAP_URL = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/';
-const PDFJS_STANDARD_FONT_URL = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/standard_fonts/';
-const PDFJS_CMAP_PACKED = false;  // jsdelivr 该版本仅提供解包后的 .bcmap
+/* ---------------------------------------------------------
+   PDF.js 字体资源（CMap / 标准字体）
+   ⚠️ 关键点：pdfjs-dist 只提供 .bcmap（二进制压缩格式），
+   因此 cMapPacked 必须为 true。若为 false，PDF.js 会请求
+   xxx.cmap → 404 → 该字体绘制的整段中文被静默丢弃，
+   表现为「发票里有些文字打印不出来」。
+   --------------------------------------------------------- */
+const PDFJS_VERSION = '3.11.174';
+const PDFJS_VENDOR_PATH = 'vendor/pdfjs/';                                        // 项目内置（优先，可离线）
+const PDFJS_CDN_PATH = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDFJS_VERSION}/`; // 兜底
+
+let pdfAssetBase = null;      // 已探测可用的资源根路径
+let pdfAssetWarned = false;   // 只提示一次
+
+/**
+ * 转成绝对 URL。
+ * ⚠️ 必须绝对：PDF.js 在 worker 内解析 cMapUrl/standardFontDataUrl，
+ * 相对路径会以 worker 脚本所在目录为基准，被拼成
+ * vendor/pdfjs/vendor/pdfjs/cmaps/... 而 404。
+ */
+function absUrl(p) {
+  try { return new URL(p, document.baseURI).href; } catch { return p; }
+}
 
 function isPdfReady() {
   return !!(window.pdfjsLib && window.pdfjsLib.getDocument);
 }
 
+/** 探测某个资源根路径是否可用（用最小的 CMap 文件试一次） */
+async function probeAssetBase(base) {
+  try {
+    const res = await fetch(base + 'cmaps/UniGB-UCS2-H.bcmap', { method: 'HEAD' });
+    return res.ok || res.status === 405; // 某些静态托管不支持 HEAD
+  } catch {
+    return false;
+  }
+}
+
+/** 解析可用的资源根路径：内置 → CDN → 兜底 */
+async function resolvePdfAssetBase() {
+  if (pdfAssetBase) return pdfAssetBase;
+  const candidates = [absUrl(PDFJS_VENDOR_PATH), absUrl(PDFJS_CDN_PATH)];
+
+  for (const base of candidates) {
+    if (await probeAssetBase(base)) { pdfAssetBase = base; return base; }
+  }
+
+  pdfAssetBase = candidates[1];
+  if (!pdfAssetWarned) {
+    pdfAssetWarned = true;
+    console.error('[PDF] CMap/标准字体资源不可达，中文可能缺字。请检查 vendor/pdfjs/ 或网络。');
+    alert('PDF 字体资源加载失败，部分中文可能无法显示。\n\n请确认 vendor/pdfjs/ 目录是否完整，或网络能否访问 CDN。');
+  }
+  return pdfAssetBase;
+}
+
 /**
  * 创建 PDF.js 加载任务（配置 CMap / 标准字体 / 系统字体回退）
  */
-function loadPdfDoc(buffer) {
+async function loadPdfDoc(buffer) {
+  const base = await resolvePdfAssetBase();
   return window.pdfjsLib.getDocument({
     data: buffer,
-    cMapUrl: PDFJS_CMAP_URL,
-    cMapPacked: PDFJS_CMAP_PACKED,
-    standardFontDataUrl: PDFJS_STANDARD_FONT_URL,
+    cMapUrl: base + 'cmaps/',
+    cMapPacked: true,                       // ✅ 必须 true：只有 .bcmap
+    standardFontDataUrl: base + 'standard_fonts/',
     useSystemFonts: true,
     disableFontFace: false,
     disableCombineTextItems: false
@@ -696,15 +797,15 @@ async function handlePdfFile(file) {
 }
 
 /**
- * 渲染 PDF 单页到 dataURL
- * @param {PDFDocumentProxy} pdfDoc
- * @param {number} pageNum
- * @param {number} scale 缩放倍率（1 = 96dpi，2 = 高清）
+ * 将 PDF 单页绘制到指定 canvas（白底 + 完整内容）
+ * - intent 用 'display'：与 PDF 阅读器所见一致。
+ *   用 'print' 时 PDF.js 会按图层的「打印可见性」过滤内容，
+ *   某些发票把金额/备注放在未勾选打印的图层上，就会整块消失。
+ * - background 强制白色，避免透明底在打印时变黑。
  */
-async function renderPdfPageToDataURL(pdfDoc, pageNum, scale = 1.5) {
+async function paintPdfPage(pdfDoc, pageNum, canvas, scale) {
   const page = await pdfDoc.getPage(pageNum);
   const viewport = page.getViewport({ scale });
-  const canvas = document.createElement('canvas');
   canvas.width  = Math.ceil(viewport.width);
   canvas.height = Math.ceil(viewport.height);
   const ctx = canvas.getContext('2d');
@@ -713,25 +814,26 @@ async function renderPdfPageToDataURL(pdfDoc, pageNum, scale = 1.5) {
   await page.render({
     canvasContext: ctx,
     viewport,
-    intent: 'print'
+    intent: 'display',
+    background: '#ffffff'
   }).promise;
+  return viewport;
+}
+
+/**
+ * 渲染 PDF 单页到 dataURL
+ * @param {PDFDocumentProxy} pdfDoc
+ * @param {number} pageNum
+ * @param {number} scale 缩放倍率（1 = 72dpi，2.5 ≈ 180dpi，3.5 ≈ 252dpi）
+ */
+async function renderPdfPageToDataURL(pdfDoc, pageNum, scale = 1.5) {
+  const canvas = document.createElement('canvas');
+  await paintPdfPage(pdfDoc, pageNum, canvas, scale);
   return canvas.toDataURL('image/png');
 }
 
 async function renderPdfPageToCanvas(pdfDoc, pageNum, canvas, scale) {
-  const page = await pdfDoc.getPage(pageNum);
-  const viewport = page.getViewport({ scale });
-  canvas.width  = Math.ceil(viewport.width);
-  canvas.height = Math.ceil(viewport.height);
-  const ctx = canvas.getContext('2d');
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  await page.render({
-    canvasContext: ctx,
-    viewport,
-    intent: 'print'
-  }).promise;
-  return viewport;
+  return paintPdfPage(pdfDoc, pageNum, canvas, scale);
 }
 
 function getImageDims(dataURL) {
@@ -857,6 +959,7 @@ async function confirmPdfImport() {
 
   // 按页码顺序导入
   const sortedPages = [...currentPdf.selected].sort((a, b) => a - b);
+  const failedPages = [];
   for (const pageNum of sortedPages) {
     try {
       const dataURL = await renderPdfPageToDataURL(pdfDoc, pageNum, 2.5);
@@ -872,12 +975,18 @@ async function confirmPdfImport() {
       done++;
       importBtn.innerHTML = `<div class="spinner" style="width:14px;height:14px;border-width:2px;"></div> 渲染中 ${done} / ${total}...`;
     } catch (err) {
+      // 不要静默跳过：失败的页必须让用户知道，否则会误以为「导入成功但内容缺失」
       console.error(`第 ${pageNum} 页渲染失败:`, err);
+      failedPages.push(pageNum);
     }
   }
   sortImagesByName(store.images);
   store.emit();
   closePdfModal();
+
+  if (failedPages.length) {
+    alert(`以下页面渲染失败，未能导入：第 ${failedPages.join('、')} 页\n${failedPages.length === total ? '（整份 PDF 均失败，可能是字体/CMap 资源缺失）' : ''}`);
+  }
 }
 
 /* ============== PDF 弹层事件绑定 ============== */
